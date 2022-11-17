@@ -157,6 +157,16 @@ class Result(ValType):
   ok: Optional[ValType]
   error: Optional[ValType]
 
+class ResourceType(Type): pass
+
+@dataclass
+class Own(ValType):
+  t: ResourceType
+
+@dataclass
+class Borrow(ValType):
+  t: ResourceType
+
 ### Despecialization
 
 def despecialize(t):
@@ -184,6 +194,7 @@ def alignment(t):
     case Record(fields)     : return alignment_record(fields)
     case Variant(cases)     : return alignment_variant(cases)
     case Flags(labels)      : return alignment_flags(labels)
+    case Own(_) | Borrow(_) : return 4
 
 #
 
@@ -238,6 +249,7 @@ def size(t):
     case Record(fields)     : return size_record(fields)
     case Variant(cases)     : return size_variant(cases)
     case Flags(labels)      : return size_flags(labels)
+    case Own(_) | Borrow(_) : return 4
 
 def size_record(fields):
   s = 0
@@ -277,8 +289,26 @@ class CanonicalOptions:
   realloc: Callable[[int,int,int,int],int]
   post_return: Callable[[],None]
 
+class Resource:
+  impl: ComponentInstance
+  rep: int
+
+class Handle:
+  resource: Resource
+
+class OwnHandle(Handle):
+  borrow_count: int
+
+class ComponentInstance:
+  handles: [Handle]
+
+class Activation:
+  lenders: [OwnHandle]
+
 class Context:
   opts: CanonicalOptions
+  inst: ComponentInstance
+  call: Activation
 
 ### Loading
 
@@ -303,6 +333,8 @@ def load(cx, ptr, t):
     case Record(fields) : return load_record(cx, ptr, fields)
     case Variant(cases) : return load_variant(cx, ptr, cases)
     case Flags(labels)  : return load_flags(cx, ptr, labels)
+    case Own(t)         : return lift_own(cx, load_int(opts, ptr, 4), t)
+    case Borrow(t)      : return lift_borrow(cx, load_int(opts, ptr, 4), t)
 
 #
 
@@ -444,6 +476,24 @@ def unpack_flags_from_int(i, labels):
     i >>= 1
   return record
 
+#
+
+def lift_own(cx, handle_index, resource_type):
+  trap_if(handle_index >= len(cx.inst.handles))
+  h = cx.inst.handles[handle_index]
+  cx.inst.handles[i] = None
+  trap_if(not isinstance(h, OwnHandle))
+  trap_if(h.borrow_count is not 0)
+  return h.resource
+
+def lift_borrow(cx, handle_index, resource_type):
+  trap_if(handle_index >= len(cx.inst.handles))
+  h = cx.inst.handles[handle_index]
+  if isinstance(h, OwnHandle):
+    h.borrow_count += 1
+    cx.call.lenders.append(h)
+  return h.resource
+
 ### Storing
 
 def store(cx, v, t, ptr):
@@ -467,6 +517,8 @@ def store(cx, v, t, ptr):
     case Record(fields) : store_record(cx, v, ptr, fields)
     case Variant(cases) : store_variant(cx, v, ptr, cases)
     case Flags(labels)  : store_flags(cx, v, ptr, labels)
+    case Own(t)         : store_int(cx, lower_own(opts, v, t), ptr, 4)
+    case Borrow(t)      : store_int(cx, lower_borrow(opts, v, t), ptr, 4)
 
 #
 
@@ -700,6 +752,15 @@ def pack_flags_into_int(v, labels):
     i |= (int(bool(v[l])) << shift)
     shift += 1
   return i
+
+#
+
+def lower_own(cx, resource, resource_type):
+  TODO
+
+
+def lower_borrow(cx, resource, resource_type):
+  TODO
 
 ### Flattening
 
