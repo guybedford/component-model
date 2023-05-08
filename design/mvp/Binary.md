@@ -23,7 +23,7 @@ magic     ::= 0x00 0x61 0x73 0x6D
 version   ::= 0x0a 0x00
 layer     ::= 0x01 0x00
 section   ::=    section_0(<core:custom>)         => ϵ
-            | m:section_1(<core:module>)          => [core-prefix(m)]
+            | m: section_1(<core:module>)         => [core-prefix(m)]
             | i*:section_2(vec(<core:instance>))  => core-prefix(i)*
             | t*:section_3(vec(<core:type>))      => core-prefix(t)*
             | c: section_4(<component>)           => [c]
@@ -101,8 +101,7 @@ Notes:
   for aliases (below).
 * Validation of `core:instantiatearg` initially only allows the `instance`
   sort, but would be extended to accept other sorts as core wasm is extended.
-* Validation of `instantiate` requires that `name` is present in an
-  `externname` of `c` (with a matching type).
+* Validation of `instantiate` requires that `name` is present in `c`.
 * When validating `instantiate`, after each individual type-import is supplied
   via `with`, the actual type supplied is immediately substituted for all uses
   of the import, so that subsequent imports and all exports are now specialized
@@ -225,7 +224,7 @@ instancedecl  ::= 0x00 t:<core:type>                      => t
                 | 0x02 a:<alias>                          => a
                 | 0x04 ed:<exportdecl>                    => ed
 importdecl    ::= en:<externname> ed:<externdesc>         => (import en ed)
-exportdecl    ::= en:<externname> ed:<externdesc>         => (export en ed)
+exportdecl    ::= n:<name> ed:<externdesc>                => (export n ed)
 externdesc    ::= 0x00 0x11 i:<core:typeidx>              => (core module (type i))
                 | 0x01 i:<typeidx>                        => (func (type i))
                 | 0x02 t:<valtype>                        => (value t)
@@ -262,8 +261,6 @@ Notes:
 * Validation rejects `resourcetype` type definitions inside `componenttype` and
   `instancettype`. Thus, handle types inside a `componenttype` can only refer
   to resource types that are imported or exported.
-* The uniqueness validation rules for `externname` described below are also
-  applied at the instance- and component-type level.
 * Validation of `externdesc` requires the various `typeidx` type constructors
   to match the preceding `sort`.
 * Validation of function parameter and result names, record field names,
@@ -326,32 +323,50 @@ flags are set.
 (See [Import and Export Definitions](Explainer.md#import-and-export-definitions)
 in the explainer.)
 ```
-import      ::= en:<externname> ed:<externdesc>                => (import en ed)
-export      ::= en:<externname> si:<sortidx> ed?:<externdesc>? => (export en si ed?)
-externname  ::= n:<name> ea:<externattrs>                      => n ea
-externattrs ::= 0x00                                           => ϵ
-              | 0x01 url:<URL>                                 => (id url)
-URL         ::= b*:vec(byte)                                   => char(b)*, if char(b)* parses as a URL
+import         ::= n:<name> en?:<externname>? ed:<externdesc>   => (import n en? ed)
+export         ::= n:<name> si:<sortidx> ed?:<externdesc>?      => (export n si ed?)
+externname     ::= id:<core:name> attrs*:vec(<externattr>)      => (extern i attrs*)
+externattr     ::= 0x00 ak:<core:name> av?:<core:name>?         => (attr k v?)
+               ::= 0x01 mk:<core:name> mv?:<core:name>?         => (meta k v?)
+               ::= 0x02 v:<version>                             => (version v)
+version        ::= M:<u16> m?:<u16>? p?:<u16>? r?:<prerelease>? => M.m.p-r           (Semver w/o build numbers)
+prerelease     ::= an:<alphanumeric>                            => an
+                 | r:<prerelease> '.' an:<alphanumeric>         => p.an
+alphanumeric   ::= an:[0x30-0x390x41-0x5a,0x61-0x7a]+           => char(an)
 ```
+
 Notes:
 * All exports (of all `sort`s) introduce a new index that aliases the exported
   definition and can be used by all subsequent definitions just like an alias.
 * Validation requires that all resource types transitively used in the type of an
   export are introduced by a preceding `importdecl` or `exportdecl`.
-* The "parses as a URL" condition is defined by executing the [basic URL
-  parser] with `char(b)*` as *input*, no optional parameters and non-fatal
-  validation errors (which coincides with definition of `URL` in JS and `rust-url`).
 * Validation requires any exported `sortidx` to have a valid `externdesc`
   (which disallows core sorts other than `core module`). When the optional
   `externdesc` immediate is present, validation requires it to be a supertype
   of the inferred `externdesc` of the `sortidx`.
-* The `name` fields of `externname` must be unique among all imports and exports
+* The `name` fields of `import` must be unique among all imports and exports
   in the containing component definition, component type or instance type. (An
   import and export cannot use the same `name`.)
-* The `id` fields of `externname` (that are present) must independently be
-  unique among imports and exports, respectively. (An import and export *may*
-  have the same `id`.)
-* URLs are compared for equality by plain byte identity.
+* `id` may be used as needed by the runtime to determine how to locate the
+  import. For example, it may be a registry-specific ID convention, a URL, path
+  or a relative URL. The `id` fields of `externname` do not need to be unique
+  for imports. Component tooling should provide the appropriate `id` for the
+  expected runtime host(s) executing the component.
+* Attributes and meta attributes may be used to defining how imports should be
+  linked. Normal attributes provide information that is necessary at component
+  runtime, while meta attributes provide information that is only necessary at
+  build time, for example for package resolution and version management.
+* The typeonly attribute implies that the import being made is not for an
+  implementation, but for 
+* A version attribute variation for Semver is specifically defined to support
+  Semver versions with pre-releases but not build numbers, and ranges. Range
+  support is based on making minor, patch, release and build versions optional,
+  thereby defining ranges over their variations. For example, `1.2` would mean
+  any version greater than or equal to `1.2.0`, excluding pre-releases.
+  Validation rules require that if a version field is omitted, the subsequent
+  fields must also be omitted. Multiple version attributes may be provided to
+  indicate a union of supported version ranges.
+* Additional `externattr` variants may be defined in future.
 
 ## Name Section
 

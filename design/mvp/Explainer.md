@@ -512,8 +512,8 @@ instancedecl  ::= core-prefix(<core:type>)
                 | <type>
                 | <alias>
                 | <exportdecl>
-importdecl    ::= (import <externname> bind-id(<externdesc>))
-exportdecl    ::= (export <externname> bind-id(<externdesc>))
+importdecl    ::= (import <name> bind-id(<externdesc>))
+exportdecl    ::= (export <name> bind-id(<externdesc>))
 externdesc    ::= (<sort> (type <u32>) )
                 | core-prefix(<core:moduletype>)
                 | <functype>
@@ -642,11 +642,10 @@ capabilities of the component model.
 
 The `importdecl` and `exportdecl` declarators correspond to component `import`
 and `export` definitions, respectively, allowing an identifier to be bound for
-use by subsequent declarators. The definition of `externname` is given in the
-[imports and exports](#import-and-export-definitions) section below. Following
-the precedent of [`core:typeuse`], the text format allows both references to
-out-of-line type definitions (via `(type <typeidx>)`) and inline type
-expressions that the text format desugars into out-of-line type definitions.
+use by subsequent declarators. Following the precedent of [`core:typeuse`],
+the text format allows both references to out-of-line type definitions (via
+`(type <typeidx>)`) and inline type expressions that the text format desugars
+into out-of-line type definitions.
 
 The `value` case of `externdesc` describes a runtime value that is imported or
 exported at instantiation time as described in the
@@ -1017,8 +1016,8 @@ produces a new local "name" for a resource type that is distinct from all
 preceding resource types. The interesting case is when resource type equality
 is considered from *outside* the component, particularly when a single
 component is instantiated multiple times. In this case, a single resource type
-definition that is exported with a single `externname` will get a fresh type
-with each component instance, with the abstract typing rules mentioned above
+definition that is exported with a single `name` will get a fresh type with
+each component instance, with the abstract typing rules mentioned above
 ensuring that each of the component's instance's resource types are kept
 distinct. Thus, in a sense, the generativity of resource types *generalizes*
 traditional name-based nominal typing, providing a finer granularity of
@@ -1312,9 +1311,15 @@ of core linear memory.
 
 Lastly, imports and exports are defined as:
 ```
-import     ::= (import <externname> bind-id(<externdesc>))
-export     ::= (export <id>? <externname> <sortidx> <externdesc>?)
-externname ::= <name> (id <URL>)?
+import     ::= (import <name> <externname>? bind-id(<externdesc>))
+export     ::= (export <name> <sortidx> <externdesc>?)
+externname    ::= (extern <externid>? <externattr>*)
+externid      ::= (id <core:name>)
+externattr    ::= (attr <core:name> <core:name>)
+                | (meta <core:name> <core:name>)
+                | (version <version>)
+version       ::= <u16>(.<u16>)?(.<u16>)?(-<prerelease>)?
+prerelease    ::= [0-9A-Za-z](.[0-9A-Za-z])*
 ```
 Both import and export definitions append a new element to the index space of
 the imported/exported `sort` which can be optionally bound to an identifier in
@@ -1362,13 +1367,12 @@ subdivision of external names allows component producers to represent a variety
 of intentions for how a component is to be instantiated and executed so that a
 variety of hosts can portably execute the component.
 
-The `name` field of `externname` is required to be unique between all the imports
-and exports of a component definition, component type or instance type. Thus, a
-single `name` can be used to unambiguously select any import or export. Based on
-this, `with` and `alias` can use a `name` (not `externname`) to select an
-import or export. The uniqueness between imports and exports ensures that Wit
-and language bindings don't have to worry about separately namespacing imports
-and exports.
+The `name` field is required to be unique between all the imports and exports of
+a component definition, component type or instance type. Thus, a single `name`
+can be used to unambiguously select any import or export. Based on this, `with`
+and `alias` can use a `name` (not `externname`) to select an import or export.
+The uniqueness between imports and exports ensures that Wit and language
+bindings don't have to worry about separately namespacing imports and exports.
 
 In guest source-code bindings, the `name` is meant to be translated to
 source-language identifiers (applying case-conversion, as described
@@ -1401,35 +1405,28 @@ and accessing its exports. For example, the [JS API]'s
 [`WebAssembly.instantiate()`] would use import `name`s in the [*read the
 imports*] step and use export `name`s in the [*create an exports object*] step.
 
-The optional `id` field of `externname` allows a component author to refer to
-an *externally-defined* specification of what an import "wants" or what an
-export has "implemented". One example is a URL naming a standard interface such
-as `wasi:filesystem` (assuming that WASI registered the `wasi:` URI scheme with
-IANA). Pre-standard, non-standard or proprietary interfaces could be referred
-to by an `https:` URL in an interface registry. For imports, a URL could
-alternatively refer to a *particular implementation* (e.g., at a hosted storage
-location) or a *query* for a *set of possible implementations* (e.g., using the
-query API of a public registry). Because of the wide variety of hosts executing
-components, the Component Model doesn't specify how URLs are to be interpreted,
-just that they are grammatically URLs. Even `https:` URLs may or may not be
-literally fetched by the host (c.f. [import maps]).
+The optional `externname` field allows a component author to refer to
+an *externally-defined* specification of what an import "wants". One example
+is a URL naming a standard interface such as `wasi:filesystem` (assuming that
+WASI registered the `wasi:` URI scheme with IANA). Pre-standard, non-standard
+or proprietary interfaces could be referred to by an `https:` URL in an
+interface registry. For imports, a URL could alternatively refer to a
+*particular implementation* (e.g., at a hosted storage location) or a *query*
+for a *set of possible implementations* (e.g., using the query API of a public
+registry). Because of the wide variety of hosts executing components, the
+Component Model doesn't specify how ids should be interpreted. Even `https:`
+URLs may or may not be literally fetched by the host (c.f. [import maps]).
 
-The URLs of present `id` fields must *also* be unique (*in addition* the
-abovementioned uniqueness of `name`s). Thus, a URL can *also* be used to
-uniquely identify the subset of imports or exports that have URLs.
-
-While the `name` field is meant for source-code bindings generators, the `id`
-field is meant for automated interpretation by hosts and toolchains. In
-particular, hosts are expected to identify their host-implemented imports and
-host-called exports by URL, not `name`. This allows hosts to implement a
-wide collection of independently-developed interfaces where `name`s are chosen
-for developer ergonomics (and name collisions are handled independently in
-the binding generators, which is needed in any case) and URLs to serve as
-the invariant identifier that concretely links the guest to host. If there was
-only a `name`, interface authors would be forced to implicitly coordinate
-across the ecosystem to avoid collisions (which in general, isn't possible)
-while if there was only a URL, the developer-friendly identifiers would have
-to be specified manually by every developer or derived in an ad hoc fashion
+While the `name` field is meant for source-code bindings generators, this `id`
+field is meant for automated interpretation by hosts and toolchains. This allows
+hosts to implement a wide collection of independently-developed interfaces where
+`name`s are chosen for developer ergonomics (and name collisions are handled
+independently in the binding generators, which is needed in any case) and ids
+serve as the invariant identifier that concretely links the guest to host. If
+there was only a `name`, interface authors would be forced to implicitly
+coordinate across the ecosystem to avoid collisions (which in general, isn't
+possible) while if there was only a URL, the developer-friendly identifiers would
+have to be specified manually by every developer or derived in an ad hoc fashion
 from the URL, whose contents may vary widely. This dual-name scheme is thus
 proposed to resolve these competing requirements.
 
@@ -1455,15 +1452,15 @@ serve as the "host" of other components, enabling [virtualization](examples/Link
 
 Since the concrete artifacts defining the host/guest interface is a collection
 of [Wit files](WIT.md), Wit must naturally allow interface authors to specify
-both the `name` and `id` of component imports and exports. While the syntax is
-still very much [in flux](https://github.com/WebAssembly/component-model/pull/83),
-a hypothetical simplified interface between a guest and host might look like:
+both the `name` and `id` of component imports and exports. A hypothetical
+simplified interface between a guest and host might look like:
 ```
 // wasi:cli/Command
 default world Command {
   import fs: "wasi:filesystem"
   import console: "wasi:cli/console"
-  export main: "wasi:cli/main"
+
+  implements: "wasi:cli/main"
 }
 ```
 where `wasi:filesystem`, `wasi:cli/console` and `wasi:cli/main` are separately
@@ -1473,7 +1470,9 @@ maps to the following component type:
 (component $Command
   (import "fs" (id "wasi:filesystem") (instance ... filesystem function exports ...))
   (import "console" (id "wasi:cli/console") (instance ... log function exports ...))
-  (export "main" (id "wasi:cli/main") (instance (export "main" (func ...))))
+  (import "cli-main" (id "wasi:cli/main") (component $cli_main (export "main" (func ...))))
+  (alias export $cli_main "main" (func $main_alias))
+  (export "main" (type $main_alias))
 )
 ```
 A component *targeting* `wasi:cli/Command` would thus need to be a *subtype* of
@@ -1559,14 +1558,12 @@ instantiated module, `WebAssembly.instantiate` would always produce a
 (again, with kebab-case component export names converted to lowerCamelCase).
 
 Since the JavaScript embedding is generic, loading all component types, it
-needs to allow the JS client to refer to either of the `name` or `URL` fields
-of component `externname`s. On the import side, this means that, when a `URL`
-is present, *read the imports* will first attempt to [`Get`] the `URL` and, on
-failure, `Get` the `name`. On the export side, this means that *both* the
-`name` and `URL` are exposed as exports in the export object (both holding the
-same value). Since `name` and `URL` are necessarily disjoint sets of strings
-(in particular, `URL`s must contain a `:`, `name` must not), there should not
-be any conflicts in either of these cases.
+needs to allow the JS client to refer to either of the `name` or `id` fields
+of component `externname`s. On the import side, this means that, when an `id`
+is present, *read the imports* will pass the `id` through the module resolver,
+on resolution error possibly falling back to the `name`. On the export side,
+this means that the `name` is exposed as exports in the export object, converted
+into the JavaScript camelcasing convention.
 
 Types are a new sort of definition that are not ([yet][type-imports]) present
 in Core WebAssembly and so the [*read the imports*] and [*create an exports
@@ -1711,7 +1708,7 @@ the same places where modules can be loaded today, branching on the `layer`
 field in the binary format to determine whether to decode as a module or a
 component.
 
-When the `URL` field of an imported `externname` is present, the `URL` is
+When the `id` field of an imported `externname` is present, the `id` is
 used as the module specifier, using the same resolution path as JS module.
 Otherwise, the `name` field is used as the module specifier, which requires
 [Import Maps] support to resolve to a `URL`.
